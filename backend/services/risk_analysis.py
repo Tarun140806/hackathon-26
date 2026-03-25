@@ -8,7 +8,7 @@ def _to_float(value, default=0.0) -> float:
 
 
 def apply_risk_analysis(cash_balance: float, obligations: list[dict]) -> list[dict]:
-	remaining_cash = _to_float(cash_balance, default=0.0)
+	remaining_cash = max(0.0, _to_float(cash_balance, default=0.0))
 	input_obligations = obligations if isinstance(obligations, list) else []
 	updated_obligations = []
 
@@ -18,6 +18,12 @@ def apply_risk_analysis(cash_balance: float, obligations: list[dict]) -> list[di
 		amount = _to_float(obligation.get("amount"), default=0.0)
 		amount_paid = _to_float(obligation.get("amount_paid"), default=0.0)
 		net_amount = max(0.0, amount - amount_paid)
+
+		if net_amount == 0.0:
+			obligation["can_pay"] = True
+			obligation["risk_level"] = "low"
+			updated_obligations.append(obligation)
+			continue
 
 		if remaining_cash >= net_amount:
 			obligation["can_pay"] = True
