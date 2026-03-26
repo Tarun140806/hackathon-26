@@ -11,6 +11,13 @@ RelationshipType = Literal["close", "neutral", "new"]
 FrequencyType = Literal["one-time", "weekly", "monthly"]
 RiskLevelType = Literal["high", "medium", "low"]
 StatusType = Literal["overdue", "due-today", "upcoming"]
+PaymentStatusType = Literal["pending", "scheduled", "paid", "overdue"]
+TransactionType = Literal[
+	"immediate_credit",
+	"immediate_debit",
+	"due_credit",
+	"due_debit",
+]
 
 
 CRITICAL_KEYWORDS = ("gst", "tds", "tax", "emi", "loan", "electricity", "utility")
@@ -42,6 +49,9 @@ class Obligation(EngineBaseModel):
 	can_pay: Optional[bool] = None
 	risk_level: Optional[RiskLevelType] = None
 	score: Optional[int] = None
+	payment_status: PaymentStatusType = "pending"
+	payment_date: Optional[str] = None
+	notes: Optional[str] = None
 	status: Optional[StatusType] = None
 	email_draft: Optional[str] = None
 
@@ -57,9 +67,19 @@ class Obligation(EngineBaseModel):
 		return self
 
 
+class Transaction(EngineBaseModel):
+	type: TransactionType
+	amount: float = 0.0
+	date: str
+	vendor: Optional[str] = None
+	penalty_if_late: float = 0.0
+	flexibility: Optional[FlexibilityType] = None
+
+
 class AnalyzeRequest(EngineBaseModel):
 	cash_balance: float
 	obligations: List[Obligation] = Field(default_factory=list)
+	transactions: List[Transaction] = Field(default_factory=list)
 
 
 class SimulationDay(EngineBaseModel):
@@ -91,3 +111,39 @@ class AnalyzeResponse(EngineBaseModel):
 	simulation: List[SimulationDay] = Field(default_factory=list)
 	reasoning: str
 	summary: DecisionSummary
+	email_draft: Optional[str] = None
+	chain_reaction: Optional[str] = None
+
+
+class PaymentStatusUpdate(EngineBaseModel):
+	id: str
+	payment_status: PaymentStatusType
+	payment_date: Optional[str] = None
+	notes: Optional[str] = None
+
+
+class RecurringObligation(EngineBaseModel):
+	id: str
+	vendor: str
+	amount: float
+	frequency: FrequencyType
+	next_occurrence: str
+	penalty_if_late: float = 0.0
+	category: Optional[CategoryType] = None
+	flexibility: Optional[FlexibilityType] = None
+
+
+class WhatIfScenario(EngineBaseModel):
+	scenario_name: str
+	cash_balance_adjustment: float
+	description: Optional[str] = None
+
+
+class PDFExportRequest(EngineBaseModel):
+	cash_balance: float
+	total_obligations: float
+	shortfall: float
+	reasoning: str
+	email_draft: Optional[str] = None
+	chain_reaction: Optional[str] = None
+	prioritized_obligations: List[Obligation] = Field(default_factory=list)

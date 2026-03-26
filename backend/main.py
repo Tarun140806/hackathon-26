@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.routes.decision import router as decision_router
 from backend.routes.upload import router as upload_router
+from backend.routes.features import router as features_router
 
 
 app = FastAPI(title="CashClear API", version="0.1.0")
@@ -18,6 +19,7 @@ app.add_middleware(
 
 app.include_router(decision_router)
 app.include_router(upload_router)
+app.include_router(features_router)
 
 
 @app.get("/health")

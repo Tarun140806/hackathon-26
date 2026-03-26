@@ -16,9 +16,14 @@ router = APIRouter(prefix="/upload", tags=["upload"])
 def _to_obligations_from_transactions(transactions: list[dict]) -> list[dict]:
 	obligations = []
 	for tx in transactions:
-		amount = float(tx.get("amount") or 0.0)
-		# Typical bank statements represent outgoing payments as negative amounts.
-		if amount >= 0:
+		tx_type = str(tx.get("type") or "").strip().lower()
+		amount = abs(float(tx.get("amount") or 0.0))
+		is_debit_type = tx_type in {"immediate_debit", "due_debit", "debit"}
+
+		# Support both typed transaction rows and legacy negative-amount rows.
+		if not is_debit_type and float(tx.get("amount") or 0.0) >= 0:
+			continue
+		if amount <= 0:
 			continue
 
 		description = str(tx.get("description") or "Transaction").strip()
@@ -27,10 +32,10 @@ def _to_obligations_from_transactions(transactions: list[dict]) -> list[dict]:
 				"id": f"imp-{len(obligations) + 1}",
 				"vendor": description[:60] or "Transaction",
 				"description": description,
-				"amount": abs(amount),
+				"amount": amount,
 				"amount_paid": 0,
 				"due_date": tx.get("date") or str(date.today()),
-				"penalty_if_late": 0,
+				"penalty_if_late": float(tx.get("penalty_if_late") or 0),
 				"flexibility": "medium",
 			}
 		)
@@ -58,10 +63,12 @@ async def upload_document(file: UploadFile = File(...)) -> dict:
 	try:
 		if ext == ".csv":
 			parsed = parse_bank_csv(tmp_path)
-			obligations = _to_obligations_from_transactions(parsed.get("transactions", []))
+			transactions = parsed.get("transactions", [])
+			obligations = _to_obligations_from_transactions(transactions)
 			response_payload = {
 				"source_type": "csv",
 				"cash_balance": float(parsed.get("cash_balance", 0.0) or 0.0),
+				"transactions": transactions,
 				"obligations": obligations,
 			}
 			upload_id = save_upload_event(file.filename, "csv", response_payload)

@@ -3,10 +3,11 @@ import { useState } from "react";
 function InputForm({
   cashBalance,
   onCashBalance,
-  onAddObligation,
+  onAddTransaction,
   onImportFile,
   onAnalyze,
 }) {
+  const [transactionType, setTransactionType] = useState("due_debit");
   const [vendor, setVendor] = useState("");
   const [amount, setAmount] = useState("");
   const [dueDate, setDueDate] = useState("");
@@ -14,33 +15,59 @@ function InputForm({
   const [flexibility, setFlexibility] = useState("medium");
   const [uploadFile, setUploadFile] = useState(null);
   const [uploadMessage, setUploadMessage] = useState("");
+  const [transactionMessage, setTransactionMessage] = useState("");
+
+  const isDueTransaction =
+    transactionType === "due_credit" || transactionType === "due_debit";
+  const isDueDebit = transactionType === "due_debit";
+
+  const getTodayDate = () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const day = String(now.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
 
   const handleCashBalanceChange = (event) => {
     const value = event.target.value;
     onCashBalance(Number(value || 0));
   };
 
-  const handleAddObligation = (event) => {
+  const handleAddTransaction = (event) => {
     event.preventDefault();
+    setTransactionMessage("");
 
-    if (!vendor || !amount || !dueDate) {
+    if (!amount || (isDueTransaction && !dueDate)) {
+      setTransactionMessage("Enter amount and date for due transactions.");
       return;
     }
 
-    onAddObligation({
-      id: `ob-${Date.now()}`,
-      vendor,
+    const transaction = {
+      id: `tx-${Date.now()}`,
+      type: transactionType,
       amount: Number(amount),
-      due_date: dueDate,
-      penalty_if_late: Number(penaltyIfLate || 0),
-      flexibility,
-    });
+      date: isDueTransaction ? dueDate : getTodayDate(),
+      vendor: vendor || undefined,
+    };
+
+    if (isDueDebit) {
+      transaction.penalty_if_late = Number(penaltyIfLate || 0);
+      transaction.flexibility = flexibility;
+    }
+
+    const outcome = onAddTransaction(transaction);
+    if (!outcome?.ok) {
+      setTransactionMessage(outcome?.error || "Transaction could not be added.");
+      return;
+    }
 
     setVendor("");
     setAmount("");
     setDueDate("");
     setPenaltyIfLate("");
     setFlexibility("medium");
+    setTransactionMessage("Transaction added.");
   };
 
   const handleImportDocument = async () => {
@@ -52,7 +79,7 @@ function InputForm({
     try {
       const importedCount = await onImportFile(uploadFile);
       setUploadMessage(
-        `Imported ${importedCount} obligation(s) from ${uploadFile.name}.`,
+        `Imported ${importedCount} item(s) from ${uploadFile.name}.`,
       );
       setUploadFile(null);
     } catch (error) {
@@ -81,6 +108,7 @@ function InputForm({
         </button>
       </div>
       {uploadMessage && <p className="helper-text">{uploadMessage}</p>}
+      {transactionMessage && <p className="helper-text">{transactionMessage}</p>}
 
       <div className="cash-field">
         <label className="field-label">
@@ -91,17 +119,37 @@ function InputForm({
             onChange={handleCashBalanceChange}
             className="field-input"
             placeholder="230000"
+            min="0"
+            step="0.01"
           />
         </label>
       </div>
 
-      <form onSubmit={handleAddObligation} className="obligation-grid">
+      <form onSubmit={handleAddTransaction} className="obligation-grid">
+        <label className="field-label">
+          Transaction Type
+          <select
+            value={transactionType}
+            onChange={(event) => {
+              const nextType = event.target.value;
+              setTransactionType(nextType);
+              if (nextType === "immediate_credit" || nextType === "immediate_debit") {
+                setDueDate("");
+              }
+            }}
+            className="field-input field-select"
+          >
+            <option value="immediate_credit">Immediate credit</option>
+            <option value="immediate_debit">Immediate debit</option>
+            <option value="due_credit">Due credit</option>
+            <option value="due_debit">Due debit</option>
+          </select>
+        </label>
         <input
           value={vendor}
           onChange={(event) => setVendor(event.target.value)}
           className="field-input"
           placeholder="Vendor"
-          required
         />
         <input
           type="number"
@@ -109,35 +157,55 @@ function InputForm({
           onChange={(event) => setAmount(event.target.value)}
           className="field-input"
           placeholder="Amount"
+          min="0.01"
+          step="0.01"
           required
         />
-        <input
-          type="date"
-          value={dueDate}
-          onChange={(event) => setDueDate(event.target.value)}
-          className="field-input"
-          required
-        />
+        {isDueTransaction ? (
+          <input
+            type="date"
+            value={dueDate}
+            onChange={(event) => setDueDate(event.target.value)}
+            className="field-input"
+            required
+          />
+        ) : (
+          <input
+            type="text"
+            value={getTodayDate()}
+            className="field-input"
+            disabled
+            readOnly
+            aria-label="Date auto-set to today for immediate transaction"
+          />
+        )}
         <input
           type="number"
           value={penaltyIfLate}
           onChange={(event) => setPenaltyIfLate(event.target.value)}
           className="field-input"
           placeholder="Penalty if late"
+          min="0"
+          step="0.01"
+          disabled={!isDueDebit}
         />
-        <select
-          value={flexibility}
-          onChange={(event) => setFlexibility(event.target.value)}
-          className="field-input field-select"
-        >
-          <option value="low">low</option>
-          <option value="medium">medium</option>
-          <option value="high">high</option>
-        </select>
+        <label className="field-label">
+          Flexibility
+          <select
+            value={flexibility}
+            onChange={(event) => setFlexibility(event.target.value)}
+            className="field-input field-select"
+            disabled={!isDueDebit}
+          >
+            <option value="low">Low flexibility</option>
+            <option value="medium">Medium flexibility</option>
+            <option value="high">High flexibility</option>
+          </select>
+        </label>
 
         <div className="button-row">
           <button type="submit" className="btn btn-primary">
-            Add Obligation
+            Add Transaction
           </button>
 
           <button

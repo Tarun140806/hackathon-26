@@ -15,16 +15,52 @@ const formatCurrency = (value) => {
 function App() {
   const [cash_balance, setCashBalance] = useState(0);
   const [obligations, setObligations] = useState([]);
+  const [transactions, setTransactions] = useState([]);
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const analyzedCashBalance = Number(result?.cash_balance);
+  const displayCashBalance = Number.isFinite(analyzedCashBalance)
+    ? analyzedCashBalance
+    : cash_balance;
 
   const handleCashBalance = (value) => {
     setCashBalance(value);
   };
 
-  const handleAddObligation = (obligation) => {
-    setObligations((prev) => [...prev, obligation]);
+  const handleAddTransaction = (transaction) => {
+    if (!transaction || typeof transaction !== "object") {
+      return { ok: false, error: "Invalid transaction." };
+    }
+
+    const amount = Number(transaction.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return { ok: false, error: "Enter a valid transaction amount." };
+    }
+
+    const currentCash = Number(cash_balance);
+    const cashIsValid = Number.isFinite(currentCash);
+
+    if (transaction.type === "immediate_debit") {
+      if (!cashIsValid) {
+        return { ok: false, error: "Cash balance is invalid." };
+      }
+      if (currentCash < amount) {
+        return {
+          ok: false,
+          error: "Insufficient cash balance for this payment.",
+        };
+      }
+      setCashBalance(currentCash - amount);
+    }
+
+    if (transaction.type === "immediate_credit") {
+      const baseCash = cashIsValid ? currentCash : 0;
+      setCashBalance(baseCash + amount);
+    }
+
+    setTransactions((prev) => [...prev, transaction]);
+    return { ok: true };
   };
 
   const handleImportFile = async (file) => {
@@ -41,28 +77,51 @@ function App() {
     }
 
     const data = await response.json();
+    const importedTransactions = Array.isArray(data.transactions)
+      ? data.transactions
+      : [];
     const importedObligations = Array.isArray(data.obligations)
       ? data.obligations
       : [];
+    const sourceType = String(data.source_type || "").toLowerCase();
+    const parsedCashBalance = Number(data.cash_balance);
+    const hasCsvBalance = sourceType === "csv" && Number.isFinite(parsedCashBalance);
+    let transactionsToStore = importedTransactions;
 
-    if (
-      typeof data.cash_balance === "number" &&
-      Number.isFinite(data.cash_balance)
-    ) {
-      setCashBalance(data.cash_balance);
+    // Only CSV imports are expected to provide bank-statement cash context.
+    if (hasCsvBalance) {
+      setCashBalance(parsedCashBalance);
+
+      // Avoid double counting: when using CSV closing balance, keep only due transactions.
+      transactionsToStore = importedTransactions.filter((item) =>
+        String(item?.type || "").toLowerCase().startsWith("due_"),
+      );
     }
 
-    if (importedObligations.length > 0) {
+    if (hasCsvBalance) {
+      // Replace previous imported timeline to prevent repeated-import accumulation.
+      setTransactions(transactionsToStore);
+    } else if (transactionsToStore.length > 0) {
+      setTransactions((prev) => [...prev, ...transactionsToStore]);
+    }
+
+    if (hasCsvBalance) {
+      setObligations(importedObligations);
+    } else if (importedObligations.length > 0) {
       setObligations((prev) => [...prev, ...importedObligations]);
     }
 
-    return importedObligations.length;
+    return transactionsToStore.length + importedObligations.length;
   };
 
   const handleAnalyze = async () => {
     setLoading(true);
     setError("");
     setResult(null);
+
+    const dueTransactions = transactions.filter((item) =>
+      String(item?.type || "").toLowerCase().startsWith("due_"),
+    );
 
     try {
       const response = await fetch("http://localhost:8000/analyze", {
@@ -71,8 +130,9 @@ function App() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          cash_balance,
-          obligations,
+          cash_balance: Number(cash_balance) || 0,
+          obligations: obligations,
+          transactions: dueTransactions,
         }),
       });
 
@@ -128,11 +188,11 @@ function App() {
             <div className="hero-stats">
               <div>
                 <p className="mini-label">Cash Balance</p>
-                <p className="mini-value">{formatCurrency(cash_balance)}</p>
+                <p className="mini-value">{formatCurrency(displayCashBalance)}</p>
               </div>
               <div>
-                <p className="mini-label">Obligations Added</p>
-                <p className="mini-value">{obligations.length}</p>
+                <p className="mini-label">Transactions Added</p>
+                <p className="mini-value">{transactions.length}</p>
               </div>
             </div>
           </header>
@@ -140,7 +200,7 @@ function App() {
           <InputForm
             cashBalance={cash_balance}
             onCashBalance={handleCashBalance}
-            onAddObligation={handleAddObligation}
+            onAddTransaction={handleAddTransaction}
             onImportFile={handleImportFile}
             onAnalyze={handleAnalyze}
           />

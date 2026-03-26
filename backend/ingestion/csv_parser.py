@@ -4,6 +4,14 @@ import re
 import pandas as pd
 
 
+VALID_TRANSACTION_TYPES = {
+	"immediate_credit",
+	"immediate_debit",
+	"due_credit",
+	"due_debit",
+}
+
+
 def _find_column(columns, aliases):
 	for alias in aliases:
 		if alias in columns:
@@ -29,6 +37,13 @@ def _to_float(value):
 		return None
 
 
+def _normalize_transaction_type(value):
+	if pd.isna(value):
+		return None
+	text = str(value).strip().lower().replace(" ", "_").replace("-", "_")
+	return text if text in VALID_TRANSACTION_TYPES else None
+
+
 def parse_bank_csv(file_path: str) -> dict:
 	if not file_path or not os.path.exists(file_path):
 		return {"cash_balance": 0.0, "transactions": []}
@@ -50,6 +65,8 @@ def parse_bank_csv(file_path: str) -> dict:
 	debit_col = _find_column(columns, ["debit"])
 	credit_col = _find_column(columns, ["credit"])
 	balance_col = _find_column(columns, ["balance", "running balance", "closing balance"])
+	type_col = _find_column(columns, ["type", "transaction_type", "transaction type"])
+	due_date_col = _find_column(columns, ["due_date", "due date"])
 
 	if not date_col or not desc_col or (not amount_col and not (debit_col or credit_col)):
 		return {"cash_balance": 0.0, "transactions": []}
@@ -89,18 +106,41 @@ def parse_bank_csv(file_path: str) -> dict:
 		if amount is None:
 			continue
 
-		running_balance += amount
+		parsed_due_date = None
+		if due_date_col:
+			raw_due_date = row.get(due_date_col)
+			parsed_due_date = pd.to_datetime(raw_due_date, errors="coerce")
+			if pd.isna(parsed_due_date):
+				parsed_due_date = None
+
+		tx_type = _normalize_transaction_type(row.get(type_col)) if type_col else None
+		if tx_type is None:
+			if amount > 0:
+				tx_type = "immediate_credit"
+			elif amount < 0:
+				tx_type = "immediate_debit"
+			else:
+				continue
+
+		if tx_type.startswith("immediate"):
+			running_balance += amount
 
 		if balance_col:
 			parsed_balance = _to_float(row.get(balance_col))
 			if parsed_balance is not None:
 				last_balance = parsed_balance
 
+		tx_date = parsed_date
+		if tx_type.startswith("due") and parsed_due_date is not None:
+			tx_date = parsed_due_date
+
 		transactions.append(
 			{
-				"date": parsed_date.strftime("%Y-%m-%d"),
+				"type": tx_type,
+				"date": tx_date.strftime("%Y-%m-%d"),
 				"description": description,
-				"amount": float(amount),
+				"vendor": description,
+				"amount": abs(float(amount)),
 			}
 		)
 

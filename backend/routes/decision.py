@@ -11,9 +11,11 @@ router = APIRouter()
 @router.post("/analyze")
 def analyze(request: AnalyzeRequest) -> dict:
 	obligations = [item.model_dump() for item in request.obligations]
+	transactions = [item.model_dump() for item in request.transactions]
 	result = run_decision_engine(
 		cash_balance=request.cash_balance,
 		obligations=obligations,
+		transactions=transactions,
 	)
 	analysis_id = save_analysis_event(request.cash_balance, obligations, result)
 	if analysis_id:
