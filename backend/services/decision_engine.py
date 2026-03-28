@@ -153,7 +153,8 @@ def run_decision_engine(cash_balance: float, obligations: list[dict], transactio
 	)
 
 	return {
-		"cash_balance": float(ending_balance),
+		"cash_balance": float(current_balance),
+		"ending_balance": float(ending_balance),
 		"total_obligations": float(total_obligations),
 		"shortfall": float(shortfall),
 		"days_to_zero": int(days_to_zero),

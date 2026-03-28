@@ -33,24 +33,21 @@ def apply_risk_analysis(cash_balance: float, obligations: list[dict]) -> list[di
 		obligation = item.copy() if isinstance(item, dict) else {}
 		provided_risk = _normalize_risk(obligation.get("risk_level"))
 
-		amount_due = obligation.get("amount_due")
-		if amount_due is not None:
-			net_amount = max(0.0, _to_float(amount_due, default=0.0))
-		else:
-			amount = _to_float(obligation.get("amount"), default=0.0)
-			amount_paid = _to_float(obligation.get("amount_paid"), default=0.0)
-			net_amount = max(0.0, amount - amount_paid)
+		amount = _to_float(obligation.get("amount"), default=0.0)
+		amount_paid = _to_float(obligation.get("amount_paid"), default=0.0)
+		fallback_amount = max(0.0, amount - amount_paid)
+		amount_due = _to_float(obligation.get("amount_due"), default=fallback_amount)
 
-		if net_amount == 0.0:
+		if amount_due == 0.0:
 			obligation["can_pay"] = True
 			obligation["risk_level"] = _max_risk_level("low", provided_risk)
 			updated_obligations.append(obligation)
 			continue
 
-		if remaining_cash >= net_amount:
+		if remaining_cash >= amount_due:
 			obligation["can_pay"] = True
 			computed_risk = "low"
-			remaining_cash -= net_amount
+			remaining_cash -= amount_due
 		else:
 			obligation["can_pay"] = False
 			flexibility = str(obligation.get("flexibility", "medium") or "medium").strip().lower()
