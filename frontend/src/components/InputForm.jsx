@@ -3,11 +3,10 @@ import { useState } from "react";
 function InputForm({
   cashBalance,
   onCashBalance,
-  onAddTransaction,
+  onAddObligation,
   onImportFile,
   onAnalyze,
 }) {
-  const [transactionType, setTransactionType] = useState("due_debit");
   const [vendor, setVendor] = useState("");
   const [amount, setAmount] = useState("");
   const [dueDate, setDueDate] = useState("");
@@ -15,209 +14,192 @@ function InputForm({
   const [flexibility, setFlexibility] = useState("medium");
   const [uploadFile, setUploadFile] = useState(null);
   const [uploadMessage, setUploadMessage] = useState("");
-  const [transactionMessage, setTransactionMessage] = useState("");
+  const [uploadError, setUploadError] = useState("");
 
-  const isDueTransaction =
-    transactionType === "due_credit" || transactionType === "due_debit";
-  const isDueDebit = transactionType === "due_debit";
-
-  const getTodayDate = () => {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, "0");
-    const day = String(now.getDate()).padStart(2, "0");
-    return `${year}-${month}-${day}`;
+  const handleCashBalanceChange = (e) => {
+    onCashBalance(Number(e.target.value || 0));
   };
 
-  const handleCashBalanceChange = (event) => {
-    const value = event.target.value;
-    onCashBalance(Number(value || 0));
-  };
+  const handleAddObligation = (e) => {
+    e.preventDefault();
+    if (!vendor || !amount || !dueDate) return;
 
-  const handleAddTransaction = (event) => {
-    event.preventDefault();
-    setTransactionMessage("");
-
-    if (!amount || (isDueTransaction && !dueDate)) {
-      setTransactionMessage("Enter amount and date for due transactions.");
-      return;
-    }
-
-    const transaction = {
-      id: `tx-${Date.now()}`,
-      type: transactionType,
+    onAddObligation({
+      id: `ob-${Date.now()}`,
+      vendor,
       amount: Number(amount),
-      date: isDueTransaction ? dueDate : getTodayDate(),
-      vendor: vendor || undefined,
-    };
-
-    if (isDueDebit) {
-      transaction.penalty_if_late = Number(penaltyIfLate || 0);
-      transaction.flexibility = flexibility;
-    }
-
-    const outcome = onAddTransaction(transaction);
-    if (!outcome?.ok) {
-      setTransactionMessage(outcome?.error || "Transaction could not be added.");
-      return;
-    }
+      due_date: dueDate,
+      penalty_if_late: Number(penaltyIfLate || 0),
+      flexibility,
+    });
 
     setVendor("");
     setAmount("");
     setDueDate("");
     setPenaltyIfLate("");
     setFlexibility("medium");
-    setTransactionMessage("Transaction added.");
   };
 
   const handleImportDocument = async () => {
-    if (!uploadFile || !onImportFile) {
-      return;
-    }
-
-    setUploadMessage("Importing file...");
+    if (!uploadFile || !onImportFile) return;
+    setUploadMessage("Importing…");
+    setUploadError("");
     try {
-      const importedCount = await onImportFile(uploadFile);
-      setUploadMessage(
-        `Imported ${importedCount} item(s) from ${uploadFile.name}.`,
-      );
+      const count = await onImportFile(uploadFile);
+      setUploadMessage(`✓ Imported ${count} obligation(s) from "${uploadFile.name}".`);
       setUploadFile(null);
-    } catch (error) {
-      setUploadMessage(error?.message || "Failed to import file.");
+    } catch (err) {
+      setUploadError(err?.message || "Failed to import file.");
+      setUploadMessage("");
     }
   };
 
   return (
-    <section className="panel">
-      <h2 className="panel-title">Input Financial Data</h2>
+    <div className="panel">
+      {/* Panel header */}
+      <div className="panel-header">
+        <h2 className="panel-title">
+          <span className="panel-title-icon">📥</span>
+          Input Financial Data
+        </h2>
+      </div>
 
-      <div className="upload-row">
+      {/* ── Upload section ── */}
+      <div className="upload-zone">
         <input
+          id="file-upload"
           type="file"
           accept=".csv,.pdf,image/png,image/jpeg,image/jpg,image/webp"
-          onChange={(event) => setUploadFile(event.target.files?.[0] || null)}
+          onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
           className="field-input"
         />
         <button
+          id="import-btn"
           type="button"
           className="btn btn-secondary"
           onClick={handleImportDocument}
           disabled={!uploadFile}
         >
-          Import CSV/PDF/Image
+          Import
         </button>
-      </div>
-      {uploadMessage && <p className="helper-text">{uploadMessage}</p>}
-      {transactionMessage && <p className="helper-text">{transactionMessage}</p>}
-
-      <div className="cash-field">
-        <label className="field-label">
-          Cash Balance
-          <input
-            type="number"
-            value={cashBalance}
-            onChange={handleCashBalanceChange}
-            className="field-input"
-            placeholder="230000"
-            min="0"
-            step="0.01"
-          />
-        </label>
+        <p className="upload-hint">
+          📎 Accepts CSV, PDF, PNG, JPG, WEBP
+        </p>
       </div>
 
-      <form onSubmit={handleAddTransaction} className="obligation-grid">
-        <label className="field-label">
-          Transaction Type
-          <select
-            value={transactionType}
-            onChange={(event) => {
-              const nextType = event.target.value;
-              setTransactionType(nextType);
-              if (nextType === "immediate_credit" || nextType === "immediate_debit") {
-                setDueDate("");
-              }
-            }}
-            className="field-input field-select"
-          >
-            <option value="immediate_credit">Immediate credit</option>
-            <option value="immediate_debit">Immediate debit</option>
-            <option value="due_credit">Due credit</option>
-            <option value="due_debit">Due debit</option>
-          </select>
+      {uploadMessage && (
+        <p className="helper-text">{uploadMessage}</p>
+      )}
+      {uploadError && (
+        <p className="state-block state-error" style={{ marginBottom: "14px" }}>
+          ⚠ {uploadError}
+        </p>
+      )}
+
+      {/* ── Cash balance ── */}
+      <div className="field-group">
+        <label htmlFor="cash-balance" className="field-label">
+          Cash Balance (₹)
         </label>
         <input
-          value={vendor}
-          onChange={(event) => setVendor(event.target.value)}
-          className="field-input"
-          placeholder="Vendor"
-        />
-        <input
+          id="cash-balance"
           type="number"
-          value={amount}
-          onChange={(event) => setAmount(event.target.value)}
+          value={cashBalance}
+          onChange={handleCashBalanceChange}
           className="field-input"
-          placeholder="Amount"
-          min="0.01"
-          step="0.01"
-          required
+          placeholder="e.g. 2,30,000"
+          min="0"
         />
-        {isDueTransaction ? (
+      </div>
+
+      <div className="divider" />
+
+      {/* ── Add Obligation form ── */}
+      <p className="field-label" style={{ marginBottom: "12px", display: "flex", alignItems: "center", gap: "6px" }}>
+        <span>➕</span> Add Obligation
+      </p>
+
+      <form onSubmit={handleAddObligation} className="obligation-grid">
+        <div className="field-group">
+          <label className="field-label" htmlFor="ob-vendor">Vendor</label>
           <input
+            id="ob-vendor"
+            value={vendor}
+            onChange={(e) => setVendor(e.target.value)}
+            className="field-input"
+            placeholder="e.g. Supplier Co."
+            required
+          />
+        </div>
+
+        <div className="field-group">
+          <label className="field-label" htmlFor="ob-amount">Amount (₹)</label>
+          <input
+            id="ob-amount"
+            type="number"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            className="field-input"
+            placeholder="e.g. 50000"
+            min="0"
+            required
+          />
+        </div>
+
+        <div className="field-group">
+          <label className="field-label" htmlFor="ob-due">Due Date</label>
+          <input
+            id="ob-due"
             type="date"
             value={dueDate}
-            onChange={(event) => setDueDate(event.target.value)}
+            onChange={(e) => setDueDate(e.target.value)}
             className="field-input"
             required
           />
-        ) : (
+        </div>
+
+        <div className="field-group">
+          <label className="field-label" htmlFor="ob-penalty">Penalty if Late (₹)</label>
           <input
-            type="text"
-            value={getTodayDate()}
+            id="ob-penalty"
+            type="number"
+            value={penaltyIfLate}
+            onChange={(e) => setPenaltyIfLate(e.target.value)}
             className="field-input"
-            disabled
-            readOnly
-            aria-label="Date auto-set to today for immediate transaction"
+            placeholder="e.g. 2000"
+            min="0"
           />
-        )}
-        <input
-          type="number"
-          value={penaltyIfLate}
-          onChange={(event) => setPenaltyIfLate(event.target.value)}
-          className="field-input"
-          placeholder="Penalty if late"
-          min="0"
-          step="0.01"
-          disabled={!isDueDebit}
-        />
-        <label className="field-label">
-          Flexibility
+        </div>
+
+        <div className="field-group full-width">
+          <label className="field-label" htmlFor="ob-flex">Payment Flexibility</label>
           <select
+            id="ob-flex"
             value={flexibility}
-            onChange={(event) => setFlexibility(event.target.value)}
-            className="field-input field-select"
-            disabled={!isDueDebit}
+            onChange={(e) => setFlexibility(e.target.value)}
+            className="field-input"
           >
-            <option value="low">Low flexibility</option>
-            <option value="medium">Medium flexibility</option>
-            <option value="high">High flexibility</option>
+            <option value="low">Low — must pay on time</option>
+            <option value="medium">Medium — some room</option>
+            <option value="high">High — can defer</option>
           </select>
-        </label>
+        </div>
 
         <div className="button-row">
-          <button type="submit" className="btn btn-primary">
-            Add Transaction
+          <button id="add-obligation-btn" type="submit" className="btn btn-primary">
+            + Add Obligation
           </button>
-
           <button
+            id="analyze-btn"
             type="button"
             onClick={onAnalyze}
-            className="btn btn-secondary"
+            className="btn btn-cta"
           >
-            Analyze
+            ⚡ Analyze Now
           </button>
         </div>
       </form>
-    </section>
+    </div>
   );
 }
 

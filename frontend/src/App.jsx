@@ -1,147 +1,66 @@
 import { useState } from "react";
+import { useAuth } from "./context/AuthContext";
 import InputForm from "./components/InputForm";
 import Results from "./components/Results";
+import AccountPage from "./pages/AccountPage";
+import TeamPage from "./pages/TeamPage";
+import ReportsPage from "./pages/ReportsPage";
+import { saveReport } from "./utils/reports";
 import "./App.css";
 
 const formatCurrency = (value) => {
   const numeric = Number(value || 0);
   return new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    maximumFractionDigits: 0,
+    style: "currency", currency: "INR", maximumFractionDigits: 0,
   }).format(Number.isFinite(numeric) ? numeric : 0);
 };
 
-function App() {
+const NAV_ITEMS = [
+  { id: "dashboard", icon: "⬡", label: "Dashboard" },
+  { id: "account",   icon: "◈", label: "My Account" },
+  { id: "team",      icon: "◎", label: "Team" },
+  { id: "reports",   icon: "▦", label: "Reports" },
+];
+
+function DashboardPage({ currentUser }) {
   const [cash_balance, setCashBalance] = useState(0);
-  const [obligations, setObligations] = useState([]);
-  const [transactions, setTransactions] = useState([]);
-  const [result, setResult] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const analyzedCashBalance = Number(result?.cash_balance);
-  const displayCashBalance = Number.isFinite(analyzedCashBalance)
-    ? analyzedCashBalance
-    : cash_balance;
+  const [obligations, setObligations]  = useState([]);
+  const [result, setResult]            = useState(null);
+  const [loading, setLoading]          = useState(false);
+  const [error, setError]              = useState("");
 
-  const handleCashBalance = (value) => {
-    setCashBalance(value);
-  };
-
-  const handleAddTransaction = (transaction) => {
-    if (!transaction || typeof transaction !== "object") {
-      return { ok: false, error: "Invalid transaction." };
-    }
-
-    const amount = Number(transaction.amount);
-    if (!Number.isFinite(amount) || amount <= 0) {
-      return { ok: false, error: "Enter a valid transaction amount." };
-    }
-
-    const currentCash = Number(cash_balance);
-    const cashIsValid = Number.isFinite(currentCash);
-
-    if (transaction.type === "immediate_debit") {
-      if (!cashIsValid) {
-        return { ok: false, error: "Cash balance is invalid." };
-      }
-      if (currentCash < amount) {
-        return {
-          ok: false,
-          error: "Insufficient cash balance for this payment.",
-        };
-      }
-      setCashBalance(currentCash - amount);
-    }
-
-    if (transaction.type === "immediate_credit") {
-      const baseCash = cashIsValid ? currentCash : 0;
-      setCashBalance(baseCash + amount);
-    }
-
-    setTransactions((prev) => [...prev, transaction]);
-    return { ok: true };
-  };
+  const handleCashBalance    = (v)  => setCashBalance(v);
+  const handleAddObligation  = (ob) => setObligations((p) => [...p, ob]);
 
   const handleImportFile = async (file) => {
     const formData = new FormData();
     formData.append("file", file);
-
-    const response = await fetch("http://localhost:8000/upload/document", {
-      method: "POST",
-      body: formData,
+    const res = await fetch("http://localhost:8000/upload/document", {
+      method: "POST", body: formData,
     });
-
-    if (!response.ok) {
-      throw new Error(`Upload failed with status ${response.status}`);
-    }
-
-    const data = await response.json();
-    const importedTransactions = Array.isArray(data.transactions)
-      ? data.transactions
-      : [];
-    const importedObligations = Array.isArray(data.obligations)
-      ? data.obligations
-      : [];
-    const sourceType = String(data.source_type || "").toLowerCase();
-    const parsedCashBalance = Number(data.cash_balance);
-    const hasCsvBalance = sourceType === "csv" && Number.isFinite(parsedCashBalance);
-    let transactionsToStore = importedTransactions;
-
-    // Only CSV imports are expected to provide bank-statement cash context.
-    if (hasCsvBalance) {
-      setCashBalance(parsedCashBalance);
-
-      // Avoid double counting: when using CSV closing balance, keep only due transactions.
-      transactionsToStore = importedTransactions.filter((item) =>
-        String(item?.type || "").toLowerCase().startsWith("due_"),
-      );
-    }
-
-    if (hasCsvBalance) {
-      // Replace previous imported timeline to prevent repeated-import accumulation.
-      setTransactions(transactionsToStore);
-    } else if (transactionsToStore.length > 0) {
-      setTransactions((prev) => [...prev, ...transactionsToStore]);
-    }
-
-    if (hasCsvBalance) {
-      setObligations(importedObligations);
-    } else if (importedObligations.length > 0) {
-      setObligations((prev) => [...prev, ...importedObligations]);
-    }
-
-    return transactionsToStore.length + importedObligations.length;
+    if (!res.ok) throw new Error(`Upload failed (${res.status})`);
+    const data = await res.json();
+    const imported = Array.isArray(data.obligations) ? data.obligations : [];
+    if (typeof data.cash_balance === "number" && Number.isFinite(data.cash_balance))
+      setCashBalance(data.cash_balance);
+    if (imported.length) setObligations((p) => [...p, ...imported]);
+    return imported.length;
   };
 
   const handleAnalyze = async () => {
     setLoading(true);
     setError("");
     setResult(null);
-
-    const dueTransactions = transactions.filter((item) =>
-      String(item?.type || "").toLowerCase().startsWith("due_"),
-    );
-
     try {
-      const response = await fetch("http://localhost:8000/analyze", {
+      const res = await fetch("http://localhost:8000/analyze", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          cash_balance: Number(cash_balance) || 0,
-          obligations: obligations,
-          transactions: dueTransactions,
-        }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cash_balance, obligations }),
       });
-
-      if (!response.ok) {
-        throw new Error(`API request failed with status ${response.status}`);
-      }
-
-      const data = await response.json();
+      if (!res.ok) throw new Error(`API error (${res.status})`);
+      const data = await res.json();
       setResult(data);
+      saveReport(data); // ← auto-save to Reports
     } catch (err) {
       setError(err.message || "Failed to analyze obligations.");
     } finally {
@@ -150,78 +69,152 @@ function App() {
   };
 
   return (
+    <>
+      {/* Hero */}
+      <header className="hero">
+        <div className="hero-bg-orb" />
+        <div className="hero-content">
+          <div className="app-badge">
+            <span className="app-badge-dot" />
+            AI-Powered
+          </div>
+          <h1 className="app-title">
+            CashClear <span>Decision Engine</span>
+          </h1>
+          <p className="app-subtitle">
+            Prioritize obligations, estimate cash-flow risk, and protect your
+            working capital — intelligently.
+          </p>
+        </div>
+        <div className="hero-stats">
+          <div className="hero-stat-card">
+            <p className="mini-label">Cash Balance</p>
+            <p className="mini-value">{formatCurrency(cash_balance)}</p>
+          </div>
+          <div className="hero-stat-card">
+            <p className="mini-label">Obligations</p>
+            <p className="mini-value">{obligations.length}</p>
+          </div>
+          <div className="hero-stat-card">
+            <p className="mini-label">Logged in as</p>
+            <p className="mini-value" style={{ fontSize: "0.95rem" }}>
+              {currentUser.name.split(" ")[0]}
+            </p>
+          </div>
+        </div>
+      </header>
+
+      {/* Form */}
+      <InputForm
+        cashBalance={cash_balance}
+        onCashBalance={handleCashBalance}
+        onAddObligation={handleAddObligation}
+        onImportFile={handleImportFile}
+        onAnalyze={handleAnalyze}
+      />
+
+      {/* Loading */}
+      {loading && (
+        <div className="state-block state-loading">
+          <span className="loading-spinner" />
+          Analyzing your obligations…
+        </div>
+      )}
+
+      {/* Error */}
+      {error && <div className="state-block state-error">⚠ {error}</div>}
+
+      {/* Results */}
+      {result && (
+        <div className="results-wrap">
+          <Results analysisResult={result} />
+        </div>
+      )}
+    </>
+  );
+}
+
+export default function App() {
+  const { currentUser, logout } = useAuth();
+  const [activePage, setActivePage] = useState("dashboard");
+
+  const renderPage = () => {
+    switch (activePage) {
+      case "account": return <AccountPage />;
+      case "team":    return <TeamPage />;
+      case "reports": return <ReportsPage />;
+      default:        return <DashboardPage currentUser={currentUser} />;
+    }
+  };
+
+  return (
     <main className="app-shell">
       <div className="grid-glow" />
-      <div className="app-wrap dashboard-grid">
-        <aside className="side-nav panel-like">
-          <h2 className="brand">CashClear</h2>
+      <div className="app-wrap">
+
+        {/* ── Sidebar ── */}
+        <aside className="side-nav">
+          {/* Brand */}
+          <div className="brand">
+            <div className="brand-icon">💎</div>
+            <span className="brand-name">CashClear</span>
+          </div>
+
+          <span className="nav-section-label">Navigation</span>
+
           <nav>
-            <button className="nav-link nav-link-active" type="button">
-              <span className="nav-icon">▦</span>
-              Dashboard
-            </button>
-            <button className="nav-link" type="button">
-              <span className="nav-icon">◉</span>
-              My Account
-            </button>
-            <button className="nav-link" type="button">
-              <span className="nav-icon">◎</span>
-              Team
-            </button>
-            <button className="nav-link" type="button">
-              <span className="nav-icon">▤</span>
-              Reports
-            </button>
+            {NAV_ITEMS.map(({ id, icon, label }) => (
+              <button
+                key={id}
+                type="button"
+                id={`nav-${id}`}
+                className={`nav-link${activePage === id ? " nav-link-active" : ""}`}
+                onClick={() => setActivePage(id)}
+              >
+                <span className="nav-icon">{icon}</span>
+                {label}
+              </button>
+            ))}
           </nav>
-          <div className="side-footer">Decision Engine v1</div>
+
+          {/* User chip */}
+          <div className="side-user-chip">
+            <img
+              src={currentUser.avatar}
+              alt={currentUser.name}
+              className="side-user-avatar"
+            />
+            <div className="side-user-info">
+              <p className="side-user-name">{currentUser.name}</p>
+              <p className="side-user-role">{currentUser.role}</p>
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div className="side-footer">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span className="side-footer-badge">
+                <span className="side-footer-dot" />
+                Engine v1
+              </span>
+              <button
+                id="sidebar-logout-btn"
+                className="btn btn-secondary"
+                style={{ padding: "4px 10px", fontSize: "0.75rem" }}
+                onClick={logout}
+              >
+                Sign Out
+              </button>
+            </div>
+          </div>
         </aside>
 
+        {/* ── Main Content ── */}
         <section className="content-area">
-          <header className="hero panel-like">
-            <div>
-              <h1 className="app-title">CashClear Decision Engine</h1>
-              <p className="app-subtitle">
-                Prioritize obligations, estimate risk, and protect working
-                capital.
-              </p>
-            </div>
-            <div className="hero-stats">
-              <div>
-                <p className="mini-label">Cash Balance</p>
-                <p className="mini-value">{formatCurrency(displayCashBalance)}</p>
-              </div>
-              <div>
-                <p className="mini-label">Transactions Added</p>
-                <p className="mini-value">{transactions.length}</p>
-              </div>
-            </div>
-          </header>
-
-          <InputForm
-            cashBalance={cash_balance}
-            onCashBalance={handleCashBalance}
-            onAddTransaction={handleAddTransaction}
-            onImportFile={handleImportFile}
-            onAnalyze={handleAnalyze}
-          />
-
-          {loading && (
-            <div className="state-block state-loading">
-              <p>Analyzing...</p>
-            </div>
-          )}
-
-          {error && <p className="state-block state-error">{error}</p>}
-
-          {result && (
-            <div className="results-wrap">
-              <Results analysisResult={result} />
-            </div>
-          )}
+          {renderPage()}
         </section>
+
       </div>
     </main>
   );
 }
-
-export default App;
